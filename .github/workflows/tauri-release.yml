@@ -5,9 +5,10 @@ on:
     branches: [ "main" ]
   release:
     types: [created]
-# run
+  workflow_dispatch: # Allows manual triggering of the workflow
+
 env:
-  APP_VERSION: $(git describe --tags --abbrev=0 || echo "v1.0.0")
+  APP_VERSION: ${{ github.ref_name }}
 
 jobs:
   build-tauri:
@@ -33,8 +34,7 @@ jobs:
         working-directory: ./src  
 
       - name: Build Frontend (Vue)
-        run: |
-          npm run desktop
+        run: npm run desktop
         working-directory: ./src  
 
       - name: Setup Rust
@@ -64,8 +64,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Vue Simulator ${{ env.VERSION }} Build Artifacts (${{ matrix.os }})
-          path: |
-            src-tauri/target/release/bundle
+          path: src-tauri/target/release/bundle
 
       - name: Publish Release
         uses: softprops/action-gh-release@v1
