@@ -1,10 +1,13 @@
-name: Vue Simulator Desktop Release
+name: Vue Simulator Desktop Automated Release Pipeline
 
 on:
   push:
     branches: [ "main" ]
   release:
     types: [created]
+
+env:
+  APP_VERSION: $(git describe --tags --abbrev=0 || echo "v1.0.0")
 
 jobs:
   build-tauri:
@@ -17,7 +20,7 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
-# node 22 is been used in circuitverse primary code base.
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -31,7 +34,7 @@ jobs:
 
       - name: Build Frontend (Vue)
         run: |
-          npm run build
+          npm run desktop
         working-directory: ./src  
 
       - name: Setup Rust
@@ -43,19 +46,33 @@ jobs:
       - name: Cache Rust Dependencies
         uses: Swatinem/rust-cache@v2
 
+      - name: Determine Version
+        id: version
+        run: echo "VERSION=$(git describe --tags --abbrev=0 || echo 'v1.0.0')" >> $GITHUB_ENV
+
       - name: Build Tauri App
         uses: tauri-apps/tauri-action@v0
         with:
           projectPath: ./src-tauri 
-          tagName: ${{ github.ref_name }}
-          releaseName: "Tauri Desktop Release ${{ github.ref_name }}"
-          releaseBody: "See the assets below to download this release."
+          tagName: "${{ env.VERSION }}"
+          releaseName: "Vue Simulator Desktop ${{ env.VERSION }}"
+          releaseBody: "Automated release pipeline with automated versioning. See the assets below to download."
           releaseDraft: false
           prerelease: false
 
       - name: Upload Tauri Build Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: Tauri Build Artifacts (${{ matrix.os }})
+          name: Vue Simulator ${{ env.VERSION }} Build Artifacts (${{ matrix.os }})
           path: |
             src-tauri/target/release/bundle
+
+      - name: Publish Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: src-tauri/target/release/bundle/**/*
+          tag_name: "${{ env.VERSION }}"
+          name: "Vue Simulator Desktop ${{ env.VERSION }}"
+          body: "Automated release pipeline with automated versioning."
+          draft: false
+          prerelease: false
