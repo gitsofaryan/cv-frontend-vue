@@ -5,7 +5,7 @@ on:
     branches: [ "main" ]
   release:
     types: [created]
-
+# run
 env:
   APP_VERSION: $(git describe --tags --abbrev=0 || echo "v1.0.0")
 
