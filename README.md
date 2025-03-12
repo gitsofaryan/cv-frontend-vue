@@ -41,6 +41,37 @@ To set up the project on your local machine, follow these steps:
   ```
   https://<preview_url>/simulatorvue/
   ```
+## CircuitVerse Desktop Installation
+We now support a desktop application for CircuitVerse using [Tauri](https://tauri.app/). Follow these steps to set up the desktop application:
+
+### Prerequisites
+Ensure that you have the following dependencies installed:
+  - [Node.js](https://nodejs.org/)
+  - [Rust](https://www.rust-lang.org/tools/install)
+  - [Tauri CLI](https://tauri.app/v1/guides/getting-started/prerequisites)
+  - [Cargo](https://doc.rust-lang.org/cargo/getting-started/installation.html) (comes with Rust)
+
+### Installation Steps
+  1. Clone the repository:
+   ```
+git clone https://github.com/CircuitVerse/cv-frontend-vue.git
+  ```
+ 2. Navigate to the project directory:
+```
+cd cv-frontend-vue
+```
+3. Install dependencies:
+```
+npm install
+```
+5. Run the Tauri development server:
+```
+npm run tauri dev
+```
+6. To build the Tauri desktop application:
+```
+npm run tauri build
+```
 
 ## How to Use Vue Simulator with CircuitVerse Main Repo
 To access the Vue Simulator from the [CircuitVerse main repo](https://github.com/CircuitVerse/CircuitVerse) dev server, you can follow one of the following methods:
