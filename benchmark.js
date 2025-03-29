@@ -7,7 +7,7 @@ suite
   .add('Tauri Startup Time', {
     defer: true,
     fn: function (deferred) {
-      const proc = spawnSync('src-tauri/target/release/circuitverse-desktop', [], { stdio: 'ignore' });
+      const proc = spawnSync('src-tauri/target/release/CircuitVerse', [], { stdio: 'ignore' });
       deferred.resolve();
     },
     onCycle: () => console.log('Ran startup test'),
@@ -15,7 +15,7 @@ suite
   .add('Memory Usage', {
     defer: true,
     fn: function (deferred) {
-      const proc = spawnSync('src-tauri/target/release/circuitverse-desktop', ['--version'], { stdio: 'pipe' });
+      const proc = spawnSync('src-tauri/target/release/CircuitVerse', ['--version'], { stdio: 'pipe' });
       deferred.resolve();
     },
     onCycle: () => console.log('Ran memory test'),
