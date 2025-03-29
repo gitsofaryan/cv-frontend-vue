@@ -1,17 +1,13 @@
-name: Vue + Tauri Simulator Desktop CI/CD
+name: Vue + Tauri Simulator Desktop Release
 
 on:
   push:
     branches: ["main"]
-  pull_request:
-    branches: ["main"]
   release:
     types: [created]
-  schedule:
-    - cron: '20 6 * * 1'  # Weekly Monday 6:20 UTC
 
 jobs:
-  test-and-build:
+  build-tauri:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -20,16 +16,16 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4  # Upgrade to v4
+        uses: actions/checkout@v4
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: 'npm'  # Add npm caching
+          cache: 'npm'
 
       - name: Install Dependencies
-        run: npm ci  # Use `ci` for cleaner installs
+        run: npm ci
         shell: bash
 
       - name: Install Tauri CLI and Plugins
@@ -40,7 +36,7 @@ jobs:
 
       - name: Setup Rust
         if: matrix.os != 'windows-latest'
-        uses: dtolnay/rust-toolchain@stable  # Modern Rust setup
+        uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.os == 'macos-latest' && 'x86_64-apple-darwin,aarch64-apple-darwin' || '' }}
 
@@ -49,42 +45,17 @@ jobs:
         with:
           workspaces: "./src-tauri"
 
-      - name: Install Platform Dependencies (Ubuntu)
+      - name: Install Linux Dependencies (Ubuntu)
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt update
-          sudo apt install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev webkit2gtk-driver xvfb
+          sudo apt install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
         shell: bash
 
-      - name: Install Platform Dependencies (macOS)
+      - name: Install macOS Dependencies
         if: matrix.os == 'macos-latest'
         run: brew install pkg-config
         shell: bash
-
-      - name: Lint with ESLint
-        run: |
-          npm install eslint@8.10.0 @microsoft/eslint-formatter-sarif@2.1.7
-          npx eslint . --ext .js,.jsx,.ts,.tsx --format @microsoft/eslint-formatter-sarif --output-file eslint-results.sarif
-        continue-on-error: true
-        shell: bash
-
-      - name: Upload ESLint Results
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: eslint-results.sarif
-
-      - name: Run Unit Tests with Vitest
-        run: |
-          npx vitest run --coverage --reporter=dot
-        env:
-          VITE_TEST_ENV: 'ci'
-        shell: bash
-
-      - name: Upload Test Coverage
-        uses: actions/upload-artifact@v4
-        with:
-          name: Test Coverage (${{ matrix.os }})
-          path: coverage/
 
       - name: Build Frontend (Vue)
         run: npm run build
@@ -92,13 +63,12 @@ jobs:
 
       - name: Build Tauri App
         env:
-          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}  # Add code signing
+          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
           TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
-        run: npm run tauri build -- --ci  # Add --ci flag for optimized builds
+        run: npm run tauri build -- --ci
         shell: bash
 
       - name: Upload Tauri Build Artifacts
-        if: github.event_name == 'release' || github.event_name == 'push'
         uses: actions/upload-artifact@v4
         with:
           name: Tauri Build Artifacts (${{ matrix.os }})
@@ -106,7 +76,7 @@ jobs:
 
   create-release:
     runs-on: ubuntu-latest
-    needs: test-and-build
+    needs: build-tauri
     if: github.event_name == 'release'
     steps:
       - name: Checkout repository
@@ -144,10 +114,9 @@ jobs:
           NEW_VERSION="v$MAJOR.$MINOR.$((PATCH + 1))"
           gh release create "$NEW_VERSION" \
             --title "CircuitVerse Desktop $NEW_VERSION" \
-            --notes "Release with updater support. Download below." \
+            --notes "Official release with in-app updates. Download below." \
             release-assets/* \
             --generate-notes
-          # Generate updater.json for tauri-plugin-updater
           echo "{\"version\": \"$NEW_VERSION\", \"pub_date\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\", \"platforms\": {\"linux-x86_64\": {\"signature\": \"\", \"url\": \"https://github.com/${{ github.repository }}/releases/download/$NEW_VERSION/app.AppImage\"}, \"windows-x86_64\": {\"signature\": \"\", \"url\": \"https://github.com/${{ github.repository }}/releases/download/$NEW_VERSION/app.msi\"}, \"darwin-x86_64\": {\"signature\": \"\", \"url\": \"https://github.com/${{ github.repository }}/releases/download/$NEW_VERSION/app.dmg\"}}}" > updater.json
           gh release upload "$NEW_VERSION" updater.json
         shell: bash
