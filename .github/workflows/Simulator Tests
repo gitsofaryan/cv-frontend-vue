@@ -26,17 +26,20 @@ jobs:
         run: npm ci
 
       - name: Run Vitest Unit Tests
-        run: npx vitest run --coverage --reporter=junit
+        run: |
+          npx vitest run --coverage --reporter=junit --outputFile=junit.xml
         env:
           VITE_TEST_ENV: 'ci'
 
       - name: Upload Test Results
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: Unit Test Results
           path: junit.xml
 
       - name: Upload Coverage Report
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: Unit Test Coverage
@@ -48,7 +51,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]  # Cross-platform E2E
+        os: [ubuntu-latest, windows-latest, macos-latest]
 
     steps:
       - name: Checkout Repository
@@ -64,17 +67,28 @@ jobs:
         run: npm ci
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
         if: matrix.os != 'windows-latest'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.os == 'macos-latest' && 'x86_64-apple-darwin,aarch64-apple-darwin' || '' }}
 
-      - name: Install Tauri CLI
-        run: cargo install tauri-driver tauri-cli --locked
+      - name: Cache Rust Dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri"
+
+      - name: Install Tauri CLI and Driver
+        run: cargo install tauri-cli tauri-driver --locked
 
       - name: Install Linux Dependencies
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt update
           sudo apt install -y libwebkit2gtk-4.1-dev webkit2gtk-driver xvfb
+
+      - name: Install macOS Dependencies
+        if: matrix.os == 'macos-latest'
+        run: brew install pkg-config
 
       - name: Start Mock API
         run: |
@@ -85,17 +99,18 @@ jobs:
       - name: Build Tauri App
         run: npm run tauri build -- --debug
 
-      - name: Run E2E Tests with WebDriverIO
-        run: |
-          npm install --save-dev webdriverio @wdio/cli @wdio/mocha-framework @wdio/local-runner
-          xvfb-run --auto-servernum npx wdio run ./wdio.conf.js
-        if: matrix.os == 'ubuntu-latest'  # Headless on Linux
-        working-directory: webdriver/webdriverio
+      - name: Install WebDriverIO
+        run: npm install --save-dev webdriverio @wdio/cli @wdio/mocha-framework @wdio/local-runner
+
+      - name: Run E2E Tests with WebDriverIO (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: xvfb-run --auto-servernum npx wdio run ./webdriver/webdriverio/wdio.conf.js
+        working-directory: .
 
       - name: Run E2E Tests (Windows/macOS)
         if: matrix.os != 'ubuntu-latest'
-        run: npx wdio run ./wdio.conf.js
-        working-directory: webdriver/webdriverio
+        run: npx wdio run ./webdriver/webdriverio/wdio.conf.js
+        working-directory: .
 
       - name: Stop Mock API
         if: always()
@@ -119,16 +134,25 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: 'npm'
 
       - name: Install Dependencies
         run: npm ci
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust Dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri"
 
       - name: Build Tauri App
         run: npm run tauri build -- --ci
 
       - name: Run Performance Benchmark
         run: |
-          npm install -g benchmark
+          npm install benchmark
           node benchmark.js > benchmark-results.txt
         env:
           TAURI_ENV: 'production'
