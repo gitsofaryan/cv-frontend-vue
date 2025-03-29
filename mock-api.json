@@ -1,0 +1,12 @@
+{
+  "verilog": {
+    "compile": {
+      "success": true,
+      "output": "Compiled Verilog code successfully"
+    }
+  },
+  "simulator": {
+    "status": "running",
+    "circuits": []
+  }
+}
