@@ -1,13 +1,17 @@
-name: Vue + Tauri Simulator Desktop Release
+name: Vue + Tauri Simulator Desktop CI/CD
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
   release:
     types: [created]
+  schedule:
+    - cron: '20 6 * * 1'  # Weekly Monday 6:20 UTC
 
 jobs:
-  build-tauri:
+  test-and-build:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -16,82 +20,94 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4  # Upgrade to v4
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
-
-      - name: Cache Node.js Dependencies
-        uses: actions/cache@v4
-        with:
-          path: ~/.npm
-          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
-          restore-keys: ${{ runner.os }}-node-
+          cache: 'npm'  # Add npm caching
 
       - name: Install Dependencies
-        run: npm install
+        run: npm ci  # Use `ci` for cleaner installs
         shell: bash
 
-      - name: Install Tauri CLI and API
+      - name: Install Tauri CLI and Plugins
         run: |
           npm install -g @tauri-apps/cli
-          npm install @tauri-apps/cli @tauri-apps/api @tauri-apps/plugin-fs --save-dev
-        shell: bash
-
-      - name: Run Cross-Platform Build Script
-        run: node tauri-build.js
+          npm install @tauri-apps/api @tauri-apps/plugin-fs @tauri-apps/plugin-updater --save-dev
         shell: bash
 
       - name: Setup Rust
         if: matrix.os != 'windows-latest'
-        run: |
-          rustup update stable
-          rustup default stable
-        shell: bash
-
-      - name: Install Linux Dependencies (Ubuntu)
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          sudo apt update
-          sudo apt install libwebkit2gtk-4.1-dev \
-          build-essential \
-          curl \
-          wget \
-          file \
-          libxdo-dev \
-          libssl-dev \
-          libayatana-appindicator3-dev \
-          librsvg2-dev
-        shell: bash
-
-      - name: Install macOS Dependencies
-        if: matrix.os == 'macos-latest'
-        run: |
-          brew update
-          brew install pkg-config
-        shell: bash
+        uses: dtolnay/rust-toolchain@stable  # Modern Rust setup
+        with:
+          targets: ${{ matrix.os == 'macos-latest' && 'x86_64-apple-darwin,aarch64-apple-darwin' || '' }}
 
       - name: Cache Rust Dependencies
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: "./src-tauri"
 
+      - name: Install Platform Dependencies (Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt update
+          sudo apt install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev webkit2gtk-driver xvfb
+        shell: bash
+
+      - name: Install Platform Dependencies (macOS)
+        if: matrix.os == 'macos-latest'
+        run: brew install pkg-config
+        shell: bash
+
+      - name: Lint with ESLint
+        run: |
+          npm install eslint@8.10.0 @microsoft/eslint-formatter-sarif@2.1.7
+          npx eslint . --ext .js,.jsx,.ts,.tsx --format @microsoft/eslint-formatter-sarif --output-file eslint-results.sarif
+        continue-on-error: true
+        shell: bash
+
+      - name: Upload ESLint Results
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: eslint-results.sarif
+
+      - name: Run Unit Tests with Vitest
+        run: |
+          npx vitest run --coverage --reporter=dot
+        env:
+          VITE_TEST_ENV: 'ci'
+        shell: bash
+
+      - name: Upload Test Coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: Test Coverage (${{ matrix.os }})
+          path: coverage/
+
+      - name: Build Frontend (Vue)
+        run: npm run build
+        shell: bash
+
       - name: Build Tauri App
-        run: npm run tauri build
+        env:
+          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}  # Add code signing
+          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+        run: npm run tauri build -- --ci  # Add --ci flag for optimized builds
         shell: bash
 
       - name: Upload Tauri Build Artifacts
+        if: github.event_name == 'release' || github.event_name == 'push'
         uses: actions/upload-artifact@v4
         with:
           name: Tauri Build Artifacts (${{ matrix.os }})
-          path: |
-            src-tauri/target/release/bundle
+          path: src-tauri/target/release/bundle
 
   create-release:
     runs-on: ubuntu-latest
-    needs: build-tauri
+    needs: test-and-build
+    if: github.event_name == 'release'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -104,67 +120,34 @@ jobs:
       - name: Prepare Release Assets
         run: |
           mkdir -p release-assets
-          
-          # For Ubuntu (Linux)
-          if [ -d "artifacts/Tauri Build Artifacts (ubuntu-latest)/deb" ]; then
-            cp artifacts/Tauri\ Build\ Artifacts\ \(ubuntu-latest\)/deb/*.deb release-assets/ || true
-          fi
-          if [ -d "artifacts/Tauri Build Artifacts (ubuntu-latest)/appimage" ]; then
-            cp artifacts/Tauri\ Build\ Artifacts\ \(ubuntu-latest\)/appimage/*.AppImage release-assets/ || true
-          fi
-          
-          # For Windows
-          if [ -d "artifacts/Tauri Build Artifacts (windows-latest)/msi" ]; then
-            cp artifacts/Tauri\ Build\ Artifacts\ \(windows-latest\)/msi/*.msi release-assets/ || true
-          fi
-          
-          # For macOS
-          if [ -d "artifacts/Tauri Build Artifacts (macos-latest)/dmg" ]; then
-            cp artifacts/Tauri\ Build\ Artifacts\ \(macos-latest\)/dmg/*.dmg release-assets/ || true
-          fi
-          if [ -d "artifacts/Tauri Build Artifacts (macos-latest)/app" ]; then
-            cd artifacts/Tauri\ Build\ Artifacts\ \(macos-latest\)/app
-            for app in *.app; do
-              zip -r "../../../release-assets/${app%.app}.zip" "$app"
-            done
-            cd - || exit
-          fi
-          
+          cp -r artifacts/Tauri\ Build\ Artifacts\ \(ubuntu-latest\)/deb/*.deb release-assets/ 2>/dev/null || true
+          cp -r artifacts/Tauri\ Build\ Artifacts\ \(ubuntu-latest\)/appimage/*.AppImage release-assets/ 2>/dev/null || true
+          cp -r artifacts/Tauri\ Build\ Artifacts\ \(windows-latest\)/msi/*.msi release-assets/ 2>/dev/null || true
+          cp -r artifacts/Tauri\ Build\ Artifacts\ \(macos-latest\)/dmg/*.dmg release-assets/ 2>/dev/null || true
+          cd artifacts/Tauri\ Build\ Artifacts\ \(macos-latest\)/app 2>/dev/null || true
+          for app in *.app; do zip -r "../../../release-assets/${app%.app}.zip" "$app"; done 2>/dev/null || true
           ls -la release-assets/
         shell: bash
 
-      - name: Install GitHub CLI
-        run: |
-          curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
-          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
-          sudo apt update
-          sudo apt install gh -y
-        shell: bash
-
-      - name: Auto-increment version and create GitHub Release
+      - name: Create GitHub Release with Updater Manifest
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Fetch latest tag
           LATEST_TAG=$(git tag --sort=-v:refname | head -n 1)
-          
-          # Extract major, minor, patch versions
           if [[ "$LATEST_TAG" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
             MAJOR=${BASH_REMATCH[1]}
             MINOR=${BASH_REMATCH[2]}
             PATCH=${BASH_REMATCH[3]}
           else
-            MAJOR=0
-            MINOR=0
-            PATCH=0
+            MAJOR=0 MINOR=0 PATCH=0
           fi
-
-          # Increment patch version
           NEW_VERSION="v$MAJOR.$MINOR.$((PATCH + 1))"
-
-          # Create release
           gh release create "$NEW_VERSION" \
             --title "CircuitVerse Desktop $NEW_VERSION" \
-            --notes "Official CircuitVerse desktop app release. Download the binaries below for your platform." \
-            release-assets/*
+            --notes "Release with updater support. Download below." \
+            release-assets/* \
+            --generate-notes
+          # Generate updater.json for tauri-plugin-updater
+          echo "{\"version\": \"$NEW_VERSION\", \"pub_date\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\", \"platforms\": {\"linux-x86_64\": {\"signature\": \"\", \"url\": \"https://github.com/${{ github.repository }}/releases/download/$NEW_VERSION/app.AppImage\"}, \"windows-x86_64\": {\"signature\": \"\", \"url\": \"https://github.com/${{ github.repository }}/releases/download/$NEW_VERSION/app.msi\"}, \"darwin-x86_64\": {\"signature\": \"\", \"url\": \"https://github.com/${{ github.repository }}/releases/download/$NEW_VERSION/app.dmg\"}}}" > updater.json
+          gh release upload "$NEW_VERSION" updater.json
         shell: bash
